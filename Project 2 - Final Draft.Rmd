@@ -1,0 +1,326 @@
+---
+author: "Dat Nguyen, Aidan Young"
+title: "Project2 - Final Draft"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggthemes)
+library(RColorBrewer)
+theme_set(theme_bw())
+library("readxl")
+library(dplyr)
+library(ggplot2)
+library(scales)
+options(scipen=999)
+governanceData <- read_csv("Governance.csv", 
+    col_types = cols(`Kyoto \nProtocol` = col_number()))
+energySupData <- read_csv("Energy supply.csv")
+energySupPerCap <- read_csv("Energy supply per capita.csv")
+CO2Data <- read_csv("co2_emission.csv")
+```
+
+# Are we making enough efforts to reduce CO2 emissions?
+
+## Introduction
+
+Climate change has been a pressing issue all over the world in the last couple of decades, and an increasing number of countries are making promises to achieve net zero carbon emission by 2050. These efforts are represented by the countries and territories' commitments to environmental treaties like the Montreal Protocol, the Kyoto Protocol, and most recently, the Paris Agreement. But have the international treaties yielded any tangible positive outcomes? Has there been any significant decline in a country's CO2 emission rate after they participated in the protocols?
+
+To get an answer to these questions, we looked into data from the United States Statistics Division (UNSD) as well as from the website Our World in Data (https://ourworldindata.org/co2-and-other-greenhouse-gas-emissions). Data for the years in which several countries joined the environment protocols were also g  We wanted to explore specifically the contribution of energy production to the change in CO2 levels, as well as whether the treaties have produced a positive effects on the reduction of this greenhouse gas.
+
+## Energy Production as one of the main factors that affect CO2 emission
+
+We suspected that CO2 may be strongly correlated with energy production, given that many nations' energy supply comes mainly from fossil fuels. The combustion of fossil fuels releases a great deal of CO2 into the environment. And with increasing demand for electricity over the years, more countries are seeking alternative energy sources with an aim to reduce CO2 emission. But just how strong are energy supply and CO2 emission related to each other?
+
+```{r, echo=FALSE, warning=FALSE}
+years_studied <- c("1990", "1991", "1992", "1993", "1994", "1995", "1996", "1997", "1998", "1999", "2000", "2001", "2002", "2003", "2004", "2005", "2006", "2007", "2008", "2009", "2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017")
+countries_studied <- c("Japan", "France", "Russian Federation", "Nigeria", "Australia", "United States")
+energySupPerCap %>%
+  rename(Country = "Country and area") %>%
+  filter(Country %in% all_of(countries_studied)) %>%
+  pivot_longer(cols = all_of(years_studied), names_to = "year", values_to = "Energy_per_capita") %>%
+  select(Country, year, Energy_per_capita) %>%
+  mutate(
+    year = parse_number(year),
+    Energy_per_capita = parse_number(Energy_per_capita, na = c("..."))
+  ) %>%
+  ggplot(aes(x = year, y = Energy_per_capita, color=Country)) +
+  geom_line() +
+  ggtitle("Energy supply (in gigajoules) per capita\nfrom 1990-2017") +
+  scale_x_continuous(
+    limits = c(1990, 2017),
+    breaks = seq(1990,2017, by = 3)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 350),
+    breaks = seq(0,350, by = 50)
+  ) +
+  theme_fivethirtyeight()
+```
+```{r, include=FALSE}
+Energy_supply_cleaned <- energySupData %>%
+  rename(Country = "Country and area") %>%
+  filter(Country %in% all_of(countries_studied)) %>%
+  pivot_longer(cols = all_of(years_studied), names_to = "year", values_to = "Energy_supply") %>%
+  select(Country, year, Energy_supply)
+
+Calculated_population <- energySupPerCap %>%
+  rename(Country = "Country and area") %>%
+  filter(Country %in% all_of(countries_studied)) %>%
+  pivot_longer(cols = all_of(years_studied), names_to = "year", values_to = "Energy_per_capita") %>%
+  select(Country, year, Energy_per_capita) %>%
+  full_join(Energy_supply_cleaned, by = c("Country", "year")) %>%
+  mutate(
+    year = parse_number(year),
+    Energy_per_capita = parse_number(Energy_per_capita, na = c("...")),
+    Energy_supply = parse_number(Energy_supply, na = c("...")),
+    Energy_supply = Energy_supply*1000000,
+    population = Energy_supply/Energy_per_capita
+    ) %>%
+  select(Country, year, population)
+```
+
+```{r, echo=FALSE, warning=FALSE}
+CO2PerCap <- CO2Data %>%
+  mutate(Entity = recode(Entity, Russia = "Russian Federation")) %>%
+  filter(Entity %in% all_of(countries_studied),
+         Year %in% all_of(years_studied)) %>%
+  rename(Country = Entity, year = Year, co2_emission = "Annual CO₂ emissions (tonnes )") %>%
+  full_join(Calculated_population, by = c("Country", "year")) %>%
+  mutate(
+    co2_per_capita = co2_emission/population
+  )
+CO2PerCap %>%
+  ggplot(aes(x=year, y=co2_per_capita, color = Country)) +
+  geom_line() +
+  ggtitle("CO2 emissions (in tonnes) per capita from 1990-2017") +
+  scale_x_continuous(
+    limits = c(1990, 2017),
+    breaks = seq(1990,2017, by = 3)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 25),
+    breaks = seq(0,25, by = 5)
+  ) +
+  theme_fivethirtyeight()
+```
+
+It seems that the time series for energy supply and CO2 emission in all 6 countries mirror each other significantly. This may suggest a strong connection between CO2 and the amount of energy produced per capita. In order to visualize the magnitude of this correlation, we made a scatterplot with a regression line that compares energy supply to CO2 emission per capita.
+
+```{r, echo=FALSE, warning=FALSE}
+EnergyVSCO2 <- energySupPerCap %>%
+  rename(Country = "Country and area") %>%
+  filter(Country %in% all_of(countries_studied)) %>%
+  pivot_longer(cols = all_of(years_studied), names_to = "year", values_to = "Energy_supply_per_capita") %>%
+  select(Country, year, Energy_supply_per_capita) %>%
+  mutate(year = parse_number(year),
+         Energy_supply_per_capita = parse_number(Energy_supply_per_capita)) %>%
+  full_join(CO2PerCap, by = c("Country", "year")) %>%
+  select(Country, year, Energy_supply_per_capita, co2_per_capita)
+EnergyVSCO2 %>%
+  ggplot(aes(x=Energy_supply_per_capita, y=co2_per_capita)) +
+  geom_point() +
+  geom_smooth(formula = y ~ x, method=lm) +
+  ggtitle("Energy supply (gigajoules) vs.\nCO2 emission (tonnes) per capita") +
+  scale_x_continuous(
+    limits = c(0, 350),
+    breaks = seq(0,350, by = 50)
+  ) +
+  theme_fivethirtyeight()
+```
+
+The graph below shows the rate of change in average CO2 levels as well as energy supply across all the countries that recorded data for these two categories compared to the year 1990. We can see that the lines mirror each other significantly, with the exception of the first three years. From 1990-1993, the average CO2 emitted in a country decreased by about 3%, whereas the average energy supply increased by more than 10%. After 27 years, CO2 emission in an average country reached more than 1.5 times its value in 1990, while Energy Supply rose by 70% over the period. We can observe that there may be a strong correlation between energy production and CO2 discharge.
+```{r, include = FALSE}
+CO2_change <- CO2Data %>%
+  filter(Year %in% all_of(years_studied)) %>%
+  group_by(Year) %>%
+  rename(co2_emission = "Annual CO₂ emissions (tonnes )") %>%
+  summarize(
+    avgCO2 = mean(co2_emission[co2_emission>0])
+  ) %>%
+  mutate (First_year = head(avgCO2, 1),
+          CO2change = avgCO2/First_year) %>%
+  select(Year, avgCO2, CO2change)
+```
+```{r, include=FALSE}
+Energy_CO2_change <- energySupData %>%
+  pivot_longer(cols = all_of(years_studied), names_to = "year", values_to = "Energy_supply") %>%
+  na_if("...") %>%
+  mutate(
+    year = parse_number(year),
+    Energy_supply = parse_number(Energy_supply)
+  ) %>%
+  group_by(year) %>%
+  summarize(
+    avgEnergy = mean(Energy_supply, na.rm = TRUE)
+  ) %>%
+  mutate(First_year = head(avgEnergy, 1),
+         EnergyChange = avgEnergy/First_year
+  ) %>%
+  rename(Year = year) %>%
+  inner_join(CO2_change, by = "Year") %>%
+  select(Year, EnergyChange, CO2change)
+```
+```{r, echo=FALSE}
+Energy_CO2_change %>%
+  ggplot(aes(x=Year)) +
+  geom_line(aes(y=EnergyChange, color = "EnergyChange")) +
+  geom_line(aes(y=CO2change, color = "CO2change")) +
+  geom_text(aes(x = 2002, y = 1.42, label = "Energy", color = "EnergyChange"), size = 5) +
+  geom_text(aes(x = 2006, y = 1.14, label = "CO2", color = "CO2change"), size = 5) +
+  ggtitle("Average Yearly Energy vs CO2 change\nin a Country (compared to 1990)") +
+  scale_x_continuous(
+    limits = c(1990, 2017),
+    breaks = seq(1990,2017, by = 3)
+  ) +
+  scale_y_continuous(
+    limits = c(0.8, 1.8),
+    breaks = seq(0.8,1.8, by = 0.2)
+  ) +
+  guides(fill = FALSE, color = FALSE, linetype = FALSE) +
+  theme_fivethirtyeight()
+```
+
+## The Montreal Protocol
+
+The Montreal Protocol was an international agreement made in 1987 that was designed to slow down the emissions of polluting substances into the atmosphere. The goal of this agreement was to slow down the destruction of the ozone layer. Every country ended up joining it at some point, though many joined later than others. Each of the data sets used are from Kaggle, and the goal is to investigate how much of an effect the Montreal Protocol had on the CO2 emissions of a few countries from around the world.
+
+```{r, include=FALSE}
+MontrealKyotoData <- governanceData %>%
+  select("Country and area","Montreal Protocol","Kyoto 
+Protocol") %>%
+  rename("Entity"="Country and area")
+joinedData <- CO2Data %>%
+  inner_join(MontrealKyotoData,by="Entity")
+```
+
+```{r, include=FALSE}
+CountryCO2Plot <- function(dataset, country_name)
+{
+  CountryData <- dataset %>%
+  filter(Entity==country_name,Year>=1950)
+  CountryMontrealYear <- CountryData$`Montreal Protocol`[1]
+  CountryKyotoYear <- CountryData$`Kyoto 
+Protocol`[1]
+CountryPlot <- CountryData %>%
+  ggplot(aes(x=Year,y=`Annual CO₂ emissions (tonnes )`)) +
+  geom_vline(xintercept=CountryMontrealYear,linetype="dashed",color="green") +
+  geom_vline(xintercept=CountryKyotoYear,linetype="dashed",color="pink") +
+  geom_line() +
+  scale_y_continuous(
+    labels=label_number(scale=1e-6,suffix="m tons",accuracy=1)
+  ) +
+  theme_fivethirtyeight()
+}
+```
+```{r, echo=FALSE}
+FrancePlot <- CountryCO2Plot(joinedData, "France") +
+  ggtitle("France's Annual CO2 Emissions") +
+  geom_text(
+    x=2000,y=3e+08,
+    label="2002: Joined the\nKyoto Protocol",
+    color="purple"
+  ) +
+  geom_text(
+    x=1978,y=2.8e+08,
+    label="1988: Joined the\nMontreal Protocol",
+    color="dark green"
+  ) +
+  geom_curve(
+    x=1978,xend=1986,y=2.5e+08,yend=2.3e+08,
+    arrow=arrow(length=unit(0.4,"cm")),
+    curvature=0.5,
+    color="dark green"
+  )
+FrancePlot
+```
+
+
+```{r, echo=FALSE}
+JapanPlot <- CountryCO2Plot(joinedData, "Japan") +
+  ggtitle("Japan's Annual CO2 Emissions") +
+  geom_text(
+    x=2000,y=6e+08,
+    label="2002: Joined the\nKyoto Protocol",
+    color="purple"
+  ) +
+  geom_text(
+    x=1978,y=5e+08,
+    label="1988: Joined the\nMontreal Protocol",
+    color="dark green"
+  ) +
+  geom_curve(
+    x=1978,xend=1986,y=3.8e+08,yend=2.3e+08,
+    arrow=arrow(length=unit(0.4,"cm")),
+    curvature=0.5,
+    color="dark green"
+  )
+JapanPlot
+```
+
+
+```{r, echo=FALSE}
+NigeriaPlot <- CountryCO2Plot(joinedData, "Nigeria") +
+  ggtitle("Nigeria's Annual CO2 Emissions") +
+  geom_text(
+    x=2010,y=3e+07,
+    label="2004: Joined the\nKyoto Protocol",
+    color="purple"
+  ) +
+  geom_text(
+    x=1960,y=7e+07,
+    label="1988: Joined the\nMontreal Protocol",
+    color="dark green"
+  ) +
+  geom_curve(
+    x=1960,xend=1986,y=5.5e+07,yend=2e+07,
+    arrow=arrow(length=unit(0.4,"cm")),
+    curvature=0.3,
+    color="dark green"
+  )
+NigeriaPlot
+```
+
+
+```{r, echo=FALSE}
+AustraliaPlot <- CountryCO2Plot(joinedData, "Australia") +
+  ggtitle("Australia's Annual CO2 Emissions") +
+  geom_text(
+    x=2005,y=1.5e+08,
+    label="2007: Joined the\nKyoto Protocol",
+    color="purple"
+  ) +
+  geom_text(
+    x=1970,y=3e+08,
+    label="1989: Joined the\nMontreal Protocol",
+    color="dark green"
+  ) +
+  geom_curve(
+    x=1970,xend=1987,y=2.6e+08,yend=1.5e+08,
+    arrow=arrow(length=unit(0.4,"cm")),
+    curvature=0.5,
+    color="dark green"
+  )
+AustraliaPlot
+```
+
+
+Each of these is a line graph showing how many tons of CO2 emissions each respective country had annually, and it also shows the year that they joined the Montreal / Kyoto Protocols. For some of the countries, their CO2 emissions had a significant drop around the time when they joined the protocols. These countries include France and Nigeria. However, for Australia and Japan, the joining of the protocols seemed to have no effect on the trend of CO2 emissions. Both continued to increase their CO2 emissions at a seemingly constant rate. For France and Nigeria the drops in CO2 emissions from the Montreal Protocol were mostly temporary, while the Kyoto Protocol may have had a more lasting effect.
+
+
+## Discussion
+
+The graphs suggest a significant relationship between Energy supply and CO2 emission, which matches our prediction. The production of energy seem to have contributed greatly to the amount of CO2 that is released into the environment. And so, one of the plausible solutions that many countries have already looked into is the utilization of green and renewable energy sources. For some countries like the US, Australia, and France, there has been a marked decrease in CO2 production in the past 10 years.
+
+The Montreal Protocol and the Kyoto Protocol seemed to have at best a temporary effect on the CO2 emissions of some countries, and these changes were not present for every country. A possibility is that the guidelines put forward by the protocols were not strict enough- if they are barely having an effect in many countries it may not have been a large enough commitment. Another possibility, and also a caveat to our findings, is that there are other variables not accounted for in these graphs. For example, Nigeria is a developing country and as a result its CO2 emissions are rising at a faster rate than those of other already developed countries. The CO2 emissions of the country could have been skewed by the rate at which it was increasing its usage of CO2-emitting technologies in the process of its development. This is only one example of a potential factor.
+
+There were a few limitations with the datasets used to create these visualizations. Because of the nature of line graphs, we were not able to fit comparisons of every country onto the same graph. As a result we were forced to choose a few countries that we felt could be relatively representative of different parts of the globe. Because many data points were missing for various countries, there was also the challenge of finding countries who did not have holes in their energy supply data. We chose a country from Africa, a country from Europe, two from Asia, another from Oceania, and finally one from America in order to diversify the geographical locations of the countries we compared. In the graphs showing the effectiveness (or lack thereof) of the protocols, we cut the countries used down to only four in order to not have too many graphs expressing a similar idea.
+
+As for why the Montreal Protocol and the Kyoto Protocol were picked to investigate the changes in CO2 levels as opposed to other environmental action protocols, these two in particular were related to greenhouse gas emissions. We would have liked to show the results of the Paris Agreement as well, but it unfortunately was created so recently that there was not enough data after its creation to investigate if any change occurred as a result.
+
+
+## Methodology
+
+Given that the goal was to show the change of CO2 emissions over time, we thought that a line graph would be the best way to express those changes. It shows how the emissions shifted in between individual years, and also gives a contour to the graph that makes it easier to see the effects that the Montreal Protocol and the Kyoto Protocol had. In order to best compare the relationship between CO2 emissions and energy production, we used a scatterplot with a regression line that shows the correlation of the two categories. For the other plot comparing CO2 emissions and energy, a double line graph was used in order to point out that the contours of the two variables were nearly identical in relation to time.
